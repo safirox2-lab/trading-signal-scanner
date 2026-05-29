@@ -1,8 +1,9 @@
 from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_rows
-from app import journal_rows
+from app import journal_rows, scan_symbol_items, scanner_scan_key
 from app import strategy_option_label, strategy_profile_from_label
 from src.evaluation.historical import StrategyEvaluation
 from src.journal.models import JournalStatus, RecommendationRecord
+from src.models.signals import Direction, SignalCandidate
 from datetime import datetime, timezone
 
 
@@ -62,6 +63,45 @@ def test_strategy_option_label_includes_win_rate():
 def test_strategy_profile_from_label_strips_visible_percent():
     assert strategy_profile_from_label("Order Block (40.0%)") == "Order Block"
     assert strategy_profile_from_label("Senal combinada") == "Senal combinada"
+
+
+def test_scan_symbol_items_sorts_results_and_collects_errors(monkeypatch):
+    def fake_scan_symbol_item(display_symbol, provider_symbol, timeframe, account_balance, min_score):
+        if display_symbol == "Bad":
+            raise ValueError("boom")
+        score = 90 if display_symbol == "High" else 75
+        return SignalCandidate(
+            symbol=provider_symbol,
+            display_symbol=display_symbol,
+            direction=Direction.LONG,
+            timeframe=timeframe,
+            entry=1.0,
+            stop_loss=0.9,
+            take_profit=1.2,
+            score=score,
+            risk_reward=2.0,
+            strategy_tags=("TREND",),
+            reasons=("trend aligned",),
+        )
+
+    monkeypatch.setattr("app.scan_symbol_item", fake_scan_symbol_item)
+
+    signals, errors = scan_symbol_items(
+        (("Low", "LOW"), ("Bad", "BAD"), ("High", "HIGH")),
+        timeframe="1h",
+        account_balance=10_000,
+        min_score=70,
+        max_workers=3,
+    )
+
+    assert [signal.display_symbol for signal in signals] == ["High", "Low"]
+    assert errors == ("Bad: boom",)
+
+
+def test_scanner_scan_key_rounds_account_balance():
+    key = scanner_scan_key((("EUR/USD", "EURUSD=X"),), "1h", 10000.129, 70)
+
+    assert key == ((("EUR/USD", "EURUSD=X"),), "1h", 10000.13, 70)
 
 
 def test_journal_rows_formats_records_for_table():

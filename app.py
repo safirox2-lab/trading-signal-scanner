@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import pandas as pd
 import streamlit as st
 
@@ -108,24 +110,112 @@ def cached_scan_symbols(
     account_balance: float,
     min_score: int,
 ):
+    return scan_symbol_items(symbol_items, timeframe, account_balance, min_score)
+
+
+def scan_symbol_item(
+    display_symbol: str,
+    provider_symbol: str,
+    timeframe: str,
+    account_balance: float,
+    min_score: int,
+):
     provider = YFinanceProvider()
+    return scan_symbol(
+        provider=provider,
+        display_symbol=display_symbol,
+        provider_symbol=provider_symbol,
+        timeframe=timeframe,
+        account_balance=account_balance,
+        min_score=min_score,
+    )
+
+
+def scan_symbol_items(
+    symbol_items: tuple[tuple[str, str], ...],
+    timeframe: str,
+    account_balance: float,
+    min_score: int,
+    max_workers: int = 5,
+):
     signals = []
     errors = []
-    for display_symbol, provider_symbol in symbol_items:
-        try:
-            signal = scan_symbol(
-                provider=provider,
-                display_symbol=display_symbol,
-                provider_symbol=provider_symbol,
-                timeframe=timeframe,
-                account_balance=account_balance,
-                min_score=min_score,
-            )
-            if signal:
-                signals.append(signal)
-        except Exception as exc:
-            errors.append(f"{display_symbol}: {exc}")
+    if not symbol_items:
+        return (), ()
+
+    worker_count = min(max_workers, len(symbol_items))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                scan_symbol_item,
+                display_symbol,
+                provider_symbol,
+                timeframe,
+                account_balance,
+                min_score,
+            ): display_symbol
+            for display_symbol, provider_symbol in symbol_items
+        }
+        for future in as_completed(futures):
+            display_symbol = futures[future]
+            try:
+                signal = future.result()
+                if signal:
+                    signals.append(signal)
+            except Exception as exc:
+                errors.append(f"{display_symbol}: {exc}")
     return tuple(sorted(signals, key=lambda item: item.score, reverse=True)), tuple(errors)
+
+
+def stored_scanner_results(scan_key):
+    if st.session_state.get("scanner_scan_key") != scan_key:
+        return (), ()
+    return (
+        st.session_state.get("scanner_signals", ()),
+        st.session_state.get("scanner_errors", ()),
+    )
+
+
+def save_scanner_results(scan_key, signals, errors) -> None:
+    st.session_state["scanner_scan_key"] = scan_key
+    st.session_state["scanner_signals"] = signals
+    st.session_state["scanner_errors"] = errors
+
+
+def scanner_scan_key(
+    symbol_items: tuple[tuple[str, str], ...],
+    timeframe: str,
+    account_balance: float,
+    min_score: int,
+):
+    return (
+        symbol_items,
+        timeframe,
+        round(account_balance, 2),
+        min_score,
+    )
+
+
+def scan_controls(
+    symbol_items: tuple[tuple[str, str], ...],
+    timeframe: str,
+    account_balance: float,
+    min_score: int,
+    auto_scan: bool,
+    scan_now: bool,
+):
+    scan_key = scanner_scan_key(symbol_items, timeframe, account_balance, min_score)
+    if auto_scan or scan_now:
+        with st.spinner("Escaneando mercados..."):
+            signals, errors = cached_scan_symbols(
+                symbol_items,
+                timeframe,
+                account_balance,
+                min_score,
+            )
+        save_scanner_results(scan_key, signals, errors)
+        return signals, errors
+    return stored_scanner_results(scan_key)
 
 
 def strategy_option_label(profile: str, evaluations: list[StrategyEvaluation]) -> str:
@@ -229,13 +319,26 @@ def main() -> None:
         min_score = st.slider("Score minimo", min_value=0, max_value=100, value=70, step=5)
         account_balance = st.number_input("Capital de cuenta", min_value=100.0, value=10_000.0, step=100.0)
         auto_record = st.toggle("Registrar recomendaciones automaticamente", value=False)
+        auto_scan = st.toggle("Escanear al abrir", value=False)
+        scan_now = st.button("Buscar oportunidades", type="primary")
         if st.button("Actualizar datos ahora"):
             st.cache_data.clear()
+            st.session_state["scanner_force_scan"] = True
             st.rerun()
 
     selected_symbols = [symbol for symbol in symbols if symbol.market in selected_markets]
     symbol_items = tuple((symbol.display, symbol.provider_symbol) for symbol in selected_symbols)
-    signals, errors = cached_scan_symbols(symbol_items, timeframe, account_balance, min_score)
+    scan_key = scanner_scan_key(symbol_items, timeframe, account_balance, min_score)
+    force_scan = st.session_state.pop("scanner_force_scan", False)
+    signals, errors = scan_controls(
+        symbol_items,
+        timeframe,
+        account_balance,
+        min_score,
+        auto_scan,
+        scan_now or force_scan,
+    )
+    has_current_scan = st.session_state.get("scanner_scan_key") == scan_key
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Senales", len(signals))
     col2.metric("Score minimo", f"{min_score}%")
@@ -339,7 +442,10 @@ def main() -> None:
             except Exception as exc:
                 st.warning(f"No se pudo cargar el grafico/evaluacion historica: {exc}")
         else:
-            st.info("No hay oportunidades que superen el filtro actual.")
+            if has_current_scan:
+                st.info("No hay oportunidades que superen el filtro actual.")
+            else:
+                st.info("Scanner listo para buscar oportunidades.")
 
     with journal_tab:
         st.subheader("Registro autonomo")
