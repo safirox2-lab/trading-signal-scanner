@@ -28,12 +28,14 @@ def test_stable_signal_key_uses_price_levels_and_date():
     assert key == "EURUSD=X|LONG|1h|1.08421|1.08001|1.09261|2026-05-29"
 
 
-def test_record_from_signal_defaults_to_open_status():
+def test_record_from_signal_defaults_to_waiting_entry_status():
     created = datetime(2026, 5, 29, 12, 30, tzinfo=timezone.utc)
 
     record = record_from_signal(make_signal(), created)
 
     assert isinstance(record, RecommendationRecord)
-    assert record.status == JournalStatus.OPEN
+    assert record.status == JournalStatus.WAITING_ENTRY
+    assert record.entry_triggered_at is None
     assert record.outcome_r is None
+    assert record.feedback == ""
     assert record.strategy_tags == ("ORDER BLOCK", "FVG")

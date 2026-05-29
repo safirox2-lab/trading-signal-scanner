@@ -6,6 +6,7 @@ from src.models.signals import SignalCandidate
 
 
 class JournalStatus(str, Enum):
+    WAITING_ENTRY = "WAITING_ENTRY"
     OPEN = "OPEN"
     TP = "TP"
     SL = "SL"
@@ -27,10 +28,12 @@ class RecommendationRecord:
     risk_reward: float
     strategy_tags: tuple[str, ...]
     reasons: tuple[str, ...]
-    status: JournalStatus = JournalStatus.OPEN
+    status: JournalStatus = JournalStatus.WAITING_ENTRY
+    entry_triggered_at: datetime | None = None
     outcome_r: float | None = None
     resolved_at: datetime | None = None
     resolution_note: str = ""
+    feedback: str = ""
 
 
 def stable_signal_key(signal: SignalCandidate, created_at: datetime | None = None) -> str:

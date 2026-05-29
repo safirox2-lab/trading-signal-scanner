@@ -129,12 +129,16 @@ def test_journal_rows_formats_records_for_table():
         strategy_tags=("ORDER BLOCK",),
         reasons=("valid order block",),
         status=JournalStatus.TP,
+        entry_triggered_at=datetime(2026, 5, 29, 1, tzinfo=timezone.utc),
         outcome_r=2.0,
         resolution_note="TP touched before SL",
+        feedback="TP alcanzado.",
     )
 
     rows = journal_rows([record])
 
     assert rows[0]["Symbol"] == "EUR/USD"
+    assert rows[0]["Entry Triggered"] == "2026-05-29 01:00"
     assert rows[0]["Status"] == "TP"
     assert rows[0]["Outcome R"] == 2.0
+    assert rows[0]["Feedback"] == "TP alcanzado."

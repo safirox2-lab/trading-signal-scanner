@@ -8,7 +8,7 @@ from src.data.providers import default_symbols
 from src.data.yfinance_provider import YFinanceProvider
 from src.evaluation.historical import StrategyEvaluation, evaluate_strategy_profiles, latest_trade_levels_for_profile
 from src.evaluation.strategy_profiles import classify_strategy_profiles, confluence_summary
-from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journal_summary
+from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journal_summary, strategy_feedback_rows
 from src.journal.models import JournalStatus, RecommendationRecord, record_from_signal
 from src.journal.resolver import resolve_recommendation
 from src.journal.store import JournalStore
@@ -244,6 +244,9 @@ def journal_rows(records: list[RecommendationRecord]) -> list[dict[str, str | in
     return [
         {
             "Created": record.created_at.strftime("%Y-%m-%d %H:%M"),
+            "Entry Triggered": record.entry_triggered_at.strftime("%Y-%m-%d %H:%M")
+            if record.entry_triggered_at
+            else "",
             "Symbol": record.display_symbol,
             "Direction": record.direction,
             "Entry": record.entry,
@@ -254,6 +257,7 @@ def journal_rows(records: list[RecommendationRecord]) -> list[dict[str, str | in
             "Status": record.status.value,
             "Outcome R": record.outcome_r,
             "Note": record.resolution_note,
+            "Feedback": record.feedback,
         }
         for record in records
     ]
@@ -263,19 +267,20 @@ def apply_theme() -> None:
     st.markdown(
         """
         <style>
-        .stApp { background: #0f1117; color: #f3f4f6; }
-        [data-testid="stSidebar"] { background: #151923; }
-        h1, h2, h3 { color: #f97316; }
+        .stApp { background: #0c0a12; color: #f5f3ff; }
+        [data-testid="stSidebar"] { background: #15111f; border-right: 1px solid #312e44; }
+        h1, h2, h3 { color: #fb923c; }
         div[data-testid="stMetricValue"] { color: #fb923c; }
+        div[data-testid="stTabs"] button { color: #f5f3ff; }
         .signal-card {
-            background: #151923;
-            border: 1px solid #272b35;
+            background: #15111f;
+            border: 1px solid #38304c;
             border-radius: 8px;
             padding: 14px;
         }
         .disclaimer {
-            color: #d1d5db;
-            background: #1f2530;
+            color: #d8d5e8;
+            background: #1b1626;
             border-left: 4px solid #f97316;
             padding: 10px 12px;
             border-radius: 6px;
@@ -362,7 +367,7 @@ def main() -> None:
         if inserted:
             st.toast(f"Recomendaciones registradas: {inserted}")
 
-    scanner_tab, journal_tab = st.tabs(["Scanner", "Registro autonomo"])
+    scanner_tab, journal_tab, feedback_tab = st.tabs(["Buscar", "Registro", "Feedback"])
 
     with scanner_tab:
         st.subheader("Oportunidades")
@@ -464,18 +469,25 @@ def main() -> None:
         if st.button("Actualizar recomendaciones abiertas"):
             updated_count = 0
             for record in store.list_recommendations():
-                if record.status != JournalStatus.OPEN:
+                if record.status not in {JournalStatus.WAITING_ENTRY, JournalStatus.OPEN}:
                     continue
                 try:
                     history = load_history(record.symbol, period="730d", interval=record.timeframe)
                     updated = resolve_recommendation(record, history)
-                    if updated.status != record.status and updated.outcome_r is not None:
+                    if (
+                        updated.status != record.status
+                        or updated.outcome_r != record.outcome_r
+                        or updated.entry_triggered_at != record.entry_triggered_at
+                        or updated.feedback != record.feedback
+                    ):
                         store.update_resolution(
                             record.signal_key,
                             updated.status,
                             updated.outcome_r,
                             updated.resolution_note,
                             updated.resolved_at,
+                            entry_triggered_at=updated.entry_triggered_at,
+                            feedback=updated.feedback,
                         )
                         updated_count += 1
                 except Exception as exc:
@@ -484,12 +496,14 @@ def main() -> None:
 
         records = store.list_recommendations()
         summary = journal_summary(records)
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Total", summary["total"])
         m2.metric("TP", summary["wins"])
         m3.metric("SL", summary["losses"])
         m4.metric("Abiertas", summary["open"])
-        m5.metric("% acierto", f'{summary["hit_rate"]:.1f}%')
+        m5.metric("Esperando entrada", summary["waiting_entry"])
+        m6.metric("% acierto", f'{summary["hit_rate"]:.1f}%')
+        st.metric("% activacion entrada", f'{summary["activation_rate"]:.1f}%')
         st.metric("Average R", summary["average_r"])
 
         if records:
@@ -507,6 +521,25 @@ def main() -> None:
             st.dataframe(hit_rate_by_symbol(records), use_container_width=True, hide_index=True)
         else:
             st.info("Aun no hay recomendaciones registradas.")
+
+    with feedback_tab:
+        st.subheader("Feedback de estrategias")
+        records = store.list_recommendations()
+        if records:
+            feedback_rows = strategy_feedback_rows(records)
+            st.dataframe(feedback_rows, use_container_width=True, hide_index=True)
+            resolved = [row for row in feedback_rows if row["wins"] + row["losses"] > 0]
+            if resolved:
+                best = max(resolved, key=lambda row: (row["hit_rate"], row["average_r"]))
+                weakest = min(resolved, key=lambda row: (row["hit_rate"], row["average_r"]))
+                c1, c2 = st.columns(2)
+                c1.metric("Mejor estrategia", best["strategy"], f'{best["hit_rate"]:.1f}% acierto')
+                c2.metric("Estrategia a revisar", weakest["strategy"], f'{weakest["hit_rate"]:.1f}% acierto')
+            st.caption(
+                "El feedback es deterministico y educativo: resume resultados historicos, no garantiza ganancias futuras."
+            )
+        else:
+            st.info("Aun no hay feedback. Guarda recomendaciones y actualizalas para empezar a medir.")
 
     if errors:
         with st.expander("Errores de datos"):

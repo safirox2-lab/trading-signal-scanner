@@ -36,12 +36,25 @@ class JournalStore:
                     strategy_tags TEXT NOT NULL,
                     reasons TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    entry_triggered_at TEXT,
                     outcome_r REAL,
                     resolved_at TEXT,
-                    resolution_note TEXT NOT NULL
+                    resolution_note TEXT NOT NULL,
+                    feedback TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            self._ensure_columns(connection)
+
+    def _ensure_columns(self, connection: sqlite3.Connection) -> None:
+        existing = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(recommendations)").fetchall()
+        }
+        if "entry_triggered_at" not in existing:
+            connection.execute("ALTER TABLE recommendations ADD COLUMN entry_triggered_at TEXT")
+        if "feedback" not in existing:
+            connection.execute("ALTER TABLE recommendations ADD COLUMN feedback TEXT NOT NULL DEFAULT ''")
 
     def insert_recommendation(self, record: RecommendationRecord) -> bool:
         with self._connect() as connection:
@@ -50,8 +63,9 @@ class JournalStore:
                 INSERT OR IGNORE INTO recommendations (
                     signal_key, created_at, symbol, display_symbol, direction, timeframe,
                     entry, stop_loss, take_profit, score, risk_reward, strategy_tags,
-                    reasons, status, outcome_r, resolved_at, resolution_note
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reasons, status, entry_triggered_at, outcome_r, resolved_at,
+                    resolution_note, feedback
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.signal_key,
@@ -68,9 +82,11 @@ class JournalStore:
                     json.dumps(record.strategy_tags),
                     json.dumps(record.reasons),
                     record.status.value,
+                    record.entry_triggered_at.isoformat() if record.entry_triggered_at else None,
                     record.outcome_r,
                     record.resolved_at.isoformat() if record.resolved_at else None,
                     record.resolution_note,
+                    record.feedback,
                 ),
             )
             return cursor.rowcount == 1
@@ -84,19 +100,33 @@ class JournalStore:
         self,
         signal_key: str,
         status: JournalStatus,
-        outcome_r: float,
+        outcome_r: float | None,
         resolution_note: str,
         resolved_at: datetime | None = None,
+        entry_triggered_at: datetime | None = None,
+        feedback: str = "",
     ) -> None:
-        timestamp = resolved_at or datetime.now(timezone.utc)
+        timestamp = resolved_at or (
+            datetime.now(timezone.utc) if status in {JournalStatus.TP, JournalStatus.SL, JournalStatus.UNRESOLVED} else None
+        )
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE recommendations
-                SET status = ?, outcome_r = ?, resolved_at = ?, resolution_note = ?
+                SET status = ?, entry_triggered_at = COALESCE(?, entry_triggered_at),
+                    outcome_r = ?, resolved_at = COALESCE(?, resolved_at),
+                    resolution_note = ?, feedback = ?
                 WHERE signal_key = ?
                 """,
-                (status.value, outcome_r, timestamp.isoformat(), resolution_note, signal_key),
+                (
+                    status.value,
+                    entry_triggered_at.isoformat() if entry_triggered_at else None,
+                    outcome_r,
+                    timestamp.isoformat() if timestamp else None,
+                    resolution_note,
+                    feedback,
+                    signal_key,
+                ),
             )
 
     def _row_to_record(self, row: sqlite3.Row) -> RecommendationRecord:
@@ -115,7 +145,9 @@ class JournalStore:
             strategy_tags=tuple(json.loads(row["strategy_tags"])),
             reasons=tuple(json.loads(row["reasons"])),
             status=JournalStatus(row["status"]),
+            entry_triggered_at=datetime.fromisoformat(row["entry_triggered_at"]) if row["entry_triggered_at"] else None,
             outcome_r=float(row["outcome_r"]) if row["outcome_r"] is not None else None,
             resolved_at=datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None,
             resolution_note=row["resolution_note"],
+            feedback=row["feedback"],
         )
