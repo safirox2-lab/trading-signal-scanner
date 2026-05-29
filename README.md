@@ -31,3 +31,9 @@ Run:
 ```
 
 Then open the local URL printed by Streamlit.
+
+## Candlestick And Strategy Evaluation
+
+The app shows a candlestick chart for a selected signal with entry, stop loss, and take profit levels. Historical strategy evaluation reports backtested win rate, setup count, profit factor, average R, and drawdown using available provider history.
+
+Intraday history is limited by the data provider; daily and weekly views use the maximum practical history available.
