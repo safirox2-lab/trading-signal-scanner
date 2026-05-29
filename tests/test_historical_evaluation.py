@@ -3,6 +3,7 @@ import pandas as pd
 from src.evaluation.historical import (
     StrategyEvaluation,
     evaluate_static_setups,
+    evaluate_strategy_profiles,
     simulate_trade_outcome,
 )
 from src.models.signals import Direction
@@ -42,3 +43,22 @@ def test_evaluate_static_setups_reports_win_rate_and_profit_factor():
     assert evaluation.setups == 2
     assert evaluation.win_rate == 100.0
     assert evaluation.profit_factor == float("inf")
+
+
+def test_evaluate_strategy_profiles_uses_distinct_setups_and_risk():
+    df = pd.DataFrame(
+        {
+            "open": [100, 101, 103, 102, 104, 106, 105, 107, 109, 108, 110, 112],
+            "high": [102, 104, 105, 103, 107, 108, 106, 110, 111, 109, 114, 115],
+            "low": [99, 100, 102, 100, 103, 104, 102, 106, 108, 105, 109, 111],
+            "close": [101, 103, 102, 104, 106, 105, 107, 109, 108, 110, 112, 114],
+            "volume": [1000, 1200, 900, 1500, 2000, 1000, 2500, 1100, 1300, 2600, 1400, 2800],
+        }
+    )
+
+    evaluations = evaluate_strategy_profiles(df, Direction.LONG)
+    setup_counts = {item.profile: item.setups for item in evaluations}
+    win_rates = {item.win_rate for item in evaluations}
+
+    assert setup_counts["Scalping / EMA Momentum"] != setup_counts["Order Block"]
+    assert len(win_rates) > 1

@@ -4,7 +4,7 @@ import streamlit as st
 from src.charts.candles import TradeLevels, build_candlestick_figure, chart_history_note
 from src.data.providers import default_symbols
 from src.data.yfinance_provider import YFinanceProvider
-from src.evaluation.historical import StrategyEvaluation, evaluate_static_setups
+from src.evaluation.historical import StrategyEvaluation, evaluate_strategy_profiles
 from src.evaluation.strategy_profiles import classify_strategy_profiles, confluence_summary
 from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journal_summary
 from src.journal.models import JournalStatus, RecommendationRecord, record_from_signal
@@ -209,11 +209,7 @@ def main() -> None:
                 fig = build_candlestick_figure(chart_df.tail(240), levels, signal.display_symbol, supported_profiles)
                 st.plotly_chart(fig, use_container_width=True)
 
-                setup_indexes = list(range(20, max(20, len(chart_df) - 5), 20))
-                evaluations = [
-                    evaluate_static_setups(chart_df, signal.direction, setup_indexes, profile=profile)
-                    for profile in STRATEGY_PROFILES
-                ]
+                evaluations = evaluate_strategy_profiles(chart_df, signal.direction)
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0
                 combined_setups = sum(item.setups for item in supported)
