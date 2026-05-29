@@ -5,3 +5,4 @@ __pycache__/
 .superpowers/
 *.pyc
 *.pyo
+streamlit*.log

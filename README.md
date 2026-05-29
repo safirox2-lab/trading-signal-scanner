@@ -17,3 +17,17 @@ python -m venv .venv
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+## Data Limitations
+
+The first version uses yfinance for convenient market data access. Data can be delayed, incomplete, or unavailable for some symbols and intervals. Use the output for research and paper trading validation before risking capital.
+
+## Verified Local Start
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+Then open the local URL printed by Streamlit.
