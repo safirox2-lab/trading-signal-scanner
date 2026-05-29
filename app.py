@@ -33,6 +33,14 @@ def chart_period_for_interval(interval: str) -> str:
     return "730d"
 
 
+def plotly_chart_config() -> dict[str, bool]:
+    return {
+        "scrollZoom": True,
+        "displayModeBar": True,
+        "responsive": True,
+    }
+
+
 def evaluation_rows(
     evaluations: list[StrategyEvaluation],
     supported_profiles: tuple[str, ...],
@@ -431,7 +439,7 @@ def main() -> None:
                     signal.display_symbol,
                     chart_tags,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config=plotly_chart_config())
 
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0

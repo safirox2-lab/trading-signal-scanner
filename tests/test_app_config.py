@@ -1,5 +1,6 @@
 from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_rows
 from app import journal_rows, scan_symbol_items, scanner_scan_key
+from app import plotly_chart_config
 from app import strategy_option_label, strategy_profile_from_label
 from src.evaluation.historical import StrategyEvaluation
 from src.journal.models import JournalStatus, RecommendationRecord
@@ -16,6 +17,14 @@ def test_chart_period_for_interval_uses_max_for_daily_and_limited_for_intraday()
     assert chart_period_for_interval("1d") == "max"
     assert chart_period_for_interval("1wk") == "max"
     assert chart_period_for_interval("1h") == "730d"
+
+
+def test_plotly_chart_config_enables_mouse_wheel_zoom():
+    config = plotly_chart_config()
+
+    assert config["scrollZoom"] is True
+    assert config["displayModeBar"] is True
+    assert config["responsive"] is True
 
 
 def test_evaluation_rows_formats_percentages():
