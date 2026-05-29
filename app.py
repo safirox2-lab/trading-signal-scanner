@@ -10,6 +10,7 @@ from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journa
 from src.journal.models import JournalStatus, RecommendationRecord, record_from_signal
 from src.journal.resolver import resolve_recommendation
 from src.journal.store import JournalStore
+from src.models.signals import Direction
 from src.strategies.scanner import scan_symbol
 
 
@@ -53,6 +54,92 @@ def evaluation_rows(
 @st.cache_data(show_spinner=False, ttl=900)
 def load_history(symbol: str, period: str, interval: str) -> pd.DataFrame:
     return YFinanceProvider().history(symbol, period=period, interval=interval)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_strategy_evaluations(
+    symbol: str,
+    period: str,
+    interval: str,
+    direction_value: str,
+) -> list[StrategyEvaluation]:
+    chart_df = load_history(symbol, period=period, interval=interval)
+    return evaluate_strategy_profiles(chart_df, Direction(direction_value))
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_profile_trade_levels(
+    symbol: str,
+    period: str,
+    interval: str,
+    direction_value: str,
+    profile: str,
+):
+    chart_df = load_history(symbol, period=period, interval=interval)
+    return latest_trade_levels_for_profile(chart_df, Direction(direction_value), profile)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_candlestick_figure(
+    symbol: str,
+    period: str,
+    interval: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    direction_value: str,
+    title: str,
+    strategy_tags: tuple[str, ...],
+):
+    chart_df = load_history(symbol, period=period, interval=interval)
+    levels = TradeLevels(
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        direction=Direction(direction_value),
+    )
+    return build_candlestick_figure(chart_df.tail(240), levels, title, strategy_tags)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_scan_symbols(
+    symbol_items: tuple[tuple[str, str], ...],
+    timeframe: str,
+    account_balance: float,
+    min_score: int,
+):
+    provider = YFinanceProvider()
+    signals = []
+    errors = []
+    for display_symbol, provider_symbol in symbol_items:
+        try:
+            signal = scan_symbol(
+                provider=provider,
+                display_symbol=display_symbol,
+                provider_symbol=provider_symbol,
+                timeframe=timeframe,
+                account_balance=account_balance,
+                min_score=min_score,
+            )
+            if signal:
+                signals.append(signal)
+        except Exception as exc:
+            errors.append(f"{display_symbol}: {exc}")
+    return tuple(sorted(signals, key=lambda item: item.score, reverse=True)), tuple(errors)
+
+
+def strategy_option_label(profile: str, evaluations: list[StrategyEvaluation]) -> str:
+    if profile == "Senal combinada":
+        return profile
+    by_profile = {evaluation.profile: evaluation for evaluation in evaluations}
+    evaluation = by_profile.get(profile)
+    if not evaluation or evaluation.setups == 0:
+        return f"{profile} (sin datos)"
+    return f"{profile} ({evaluation.win_rate:.1f}%)"
+
+
+def strategy_profile_from_label(label: str) -> str:
+    return label.split(" (", 1)[0]
 
 
 def journal_rows(records: list[RecommendationRecord]) -> list[dict[str, str | int | float | None]]:
@@ -129,7 +216,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    provider = YFinanceProvider()
     symbols = default_symbols()
 
     with st.sidebar:
@@ -143,26 +229,13 @@ def main() -> None:
         min_score = st.slider("Score minimo", min_value=0, max_value=100, value=70, step=5)
         account_balance = st.number_input("Capital de cuenta", min_value=100.0, value=10_000.0, step=100.0)
         auto_record = st.toggle("Registrar recomendaciones automaticamente", value=False)
+        if st.button("Actualizar datos ahora"):
+            st.cache_data.clear()
+            st.rerun()
 
     selected_symbols = [symbol for symbol in symbols if symbol.market in selected_markets]
-    signals = []
-    errors = []
-    for symbol in selected_symbols:
-        try:
-            signal = scan_symbol(
-                provider=provider,
-                display_symbol=symbol.display,
-                provider_symbol=symbol.provider_symbol,
-                timeframe=timeframe,
-                account_balance=account_balance,
-                min_score=min_score,
-            )
-            if signal:
-                signals.append(signal)
-        except Exception as exc:
-            errors.append(f"{symbol.display}: {exc}")
-
-    signals = sorted(signals, key=lambda item: item.score, reverse=True)
+    symbol_items = tuple((symbol.display, symbol.provider_symbol) for symbol in selected_symbols)
+    signals, errors = cached_scan_symbols(symbol_items, timeframe, account_balance, min_score)
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Senales", len(signals))
     col2.metric("Score minimo", f"{min_score}%")
@@ -199,14 +272,28 @@ def main() -> None:
             chart_period = chart_period_for_interval(chart_interval)
             st.caption(chart_history_note(chart_interval))
             try:
-                chart_df = load_history(signal.symbol, period=chart_period, interval=chart_interval)
+                evaluations = cached_strategy_evaluations(
+                    signal.symbol,
+                    chart_period,
+                    chart_interval,
+                    signal.direction.value,
+                )
+                strategy_options = ("Senal combinada",) + STRATEGY_PROFILES
+                strategy_labels = tuple(strategy_option_label(profile, evaluations) for profile in strategy_options)
                 strategy_chart_choice = st.selectbox(
                     "Estrategia en grafico",
-                    ("Senal combinada",) + STRATEGY_PROFILES,
+                    strategy_labels,
                 )
+                strategy_chart_choice = strategy_profile_from_label(strategy_chart_choice)
                 profile_levels = None
                 if strategy_chart_choice != "Senal combinada":
-                    profile_levels = latest_trade_levels_for_profile(chart_df, signal.direction, strategy_chart_choice)
+                    profile_levels = cached_profile_trade_levels(
+                        signal.symbol,
+                        chart_period,
+                        chart_interval,
+                        signal.direction.value,
+                        strategy_chart_choice,
+                    )
                 if profile_levels:
                     levels = TradeLevels(
                         entry=profile_levels.entry,
@@ -230,10 +317,19 @@ def main() -> None:
                     chart_tags = supported_profiles
                     if strategy_chart_choice != "Senal combinada":
                         st.warning("La estrategia seleccionada no tiene setup reciente suficiente para marcar niveles.")
-                fig = build_candlestick_figure(chart_df.tail(240), levels, signal.display_symbol, chart_tags)
+                fig = cached_candlestick_figure(
+                    signal.symbol,
+                    chart_period,
+                    chart_interval,
+                    levels.entry,
+                    levels.stop_loss,
+                    levels.take_profit,
+                    signal.direction.value,
+                    signal.display_symbol,
+                    chart_tags,
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
-                evaluations = evaluate_strategy_profiles(chart_df, signal.direction)
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0
                 combined_setups = sum(item.setups for item in supported)

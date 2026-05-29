@@ -1,5 +1,6 @@
 from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_rows
 from app import journal_rows
+from app import strategy_option_label, strategy_profile_from_label
 from src.evaluation.historical import StrategyEvaluation
 from src.journal.models import JournalStatus, RecommendationRecord
 from datetime import datetime, timezone
@@ -36,6 +37,31 @@ def test_evaluation_rows_formats_percentages():
     assert rows[0]["Supports current trade"] == "Yes"
     assert rows[0]["Win rate"] == "60.0%"
     assert rows[0]["Max drawdown"] == "12.0%"
+
+
+def test_strategy_option_label_includes_win_rate():
+    label = strategy_option_label(
+        "Order Block",
+        [
+            StrategyEvaluation(
+                profile="Order Block",
+                setups=25,
+                wins=10,
+                losses=15,
+                win_rate=40.0,
+                profit_factor=1.3,
+                average_r=0.2,
+                max_drawdown=0.08,
+            )
+        ],
+    )
+
+    assert label == "Order Block (40.0%)"
+
+
+def test_strategy_profile_from_label_strips_visible_percent():
+    assert strategy_profile_from_label("Order Block (40.0%)") == "Order Block"
+    assert strategy_profile_from_label("Senal combinada") == "Senal combinada"
 
 
 def test_journal_rows_formats_records_for_table():
