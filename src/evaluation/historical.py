@@ -32,6 +32,16 @@ class StrategyProfileConfig:
     setup_indexes: list[int]
 
 
+@dataclass(frozen=True)
+class ProfileTradeLevels:
+    profile: str
+    entry: float
+    stop_loss: float
+    take_profit: float
+    risk_reward: float
+    setup_index: int
+
+
 def simulate_trade_outcome(
     future: pd.DataFrame,
     direction: Direction,
@@ -150,6 +160,37 @@ def evaluate_strategy_profiles(df: pd.DataFrame, direction: Direction) -> list[S
             )
         )
     return evaluations
+
+
+def latest_trade_levels_for_profile(
+    df: pd.DataFrame,
+    direction: Direction,
+    profile: str,
+) -> ProfileTradeLevels | None:
+    configs = {config.profile: config for config in strategy_profile_configs(df, direction)}
+    config = configs.get(profile)
+    if config is None or not config.setup_indexes:
+        return None
+    setup_index = max(index for index in config.setup_indexes if index < len(df))
+    latest_atr = atr(df, period=14)
+    entry = float(df.iloc[setup_index]["close"])
+    atr_value = float(latest_atr.iloc[setup_index])
+    candle_range = float(df.iloc[setup_index]["high"] - df.iloc[setup_index]["low"])
+    distance = max(atr_value * config.atr_stop_multiple, candle_range, entry * 0.001)
+    if direction == Direction.LONG:
+        stop_loss = entry - distance
+        take_profit = entry + (distance * config.reward_multiple)
+    else:
+        stop_loss = entry + distance
+        take_profit = entry - (distance * config.reward_multiple)
+    return ProfileTradeLevels(
+        profile=profile,
+        entry=round(entry, 5),
+        stop_loss=round(stop_loss, 5),
+        take_profit=round(take_profit, 5),
+        risk_reward=config.reward_multiple,
+        setup_index=setup_index,
+    )
 
 
 def _ema_momentum_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:

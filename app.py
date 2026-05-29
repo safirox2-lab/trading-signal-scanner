@@ -4,7 +4,7 @@ import streamlit as st
 from src.charts.candles import TradeLevels, build_candlestick_figure, chart_history_note
 from src.data.providers import default_symbols
 from src.data.yfinance_provider import YFinanceProvider
-from src.evaluation.historical import StrategyEvaluation, evaluate_strategy_profiles
+from src.evaluation.historical import StrategyEvaluation, evaluate_strategy_profiles, latest_trade_levels_for_profile
 from src.evaluation.strategy_profiles import classify_strategy_profiles, confluence_summary
 from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journal_summary
 from src.journal.models import JournalStatus, RecommendationRecord, record_from_signal
@@ -200,13 +200,37 @@ def main() -> None:
             st.caption(chart_history_note(chart_interval))
             try:
                 chart_df = load_history(signal.symbol, period=chart_period, interval=chart_interval)
-                levels = TradeLevels(
-                    entry=signal.entry,
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit,
-                    direction=signal.direction,
+                strategy_chart_choice = st.selectbox(
+                    "Estrategia en grafico",
+                    ("Senal combinada",) + STRATEGY_PROFILES,
                 )
-                fig = build_candlestick_figure(chart_df.tail(240), levels, signal.display_symbol, supported_profiles)
+                profile_levels = None
+                if strategy_chart_choice != "Senal combinada":
+                    profile_levels = latest_trade_levels_for_profile(chart_df, signal.direction, strategy_chart_choice)
+                if profile_levels:
+                    levels = TradeLevels(
+                        entry=profile_levels.entry,
+                        stop_loss=profile_levels.stop_loss,
+                        take_profit=profile_levels.take_profit,
+                        direction=signal.direction,
+                    )
+                    chart_tags = (profile_levels.profile,)
+                    st.write(
+                        f"{profile_levels.profile}: Entrada {profile_levels.entry} | "
+                        f"SL {profile_levels.stop_loss} | TP {profile_levels.take_profit} | "
+                        f"R:R {profile_levels.risk_reward}"
+                    )
+                else:
+                    levels = TradeLevels(
+                        entry=signal.entry,
+                        stop_loss=signal.stop_loss,
+                        take_profit=signal.take_profit,
+                        direction=signal.direction,
+                    )
+                    chart_tags = supported_profiles
+                    if strategy_chart_choice != "Senal combinada":
+                        st.warning("La estrategia seleccionada no tiene setup reciente suficiente para marcar niveles.")
+                fig = build_candlestick_figure(chart_df.tail(240), levels, signal.display_symbol, chart_tags)
                 st.plotly_chart(fig, use_container_width=True)
 
                 evaluations = evaluate_strategy_profiles(chart_df, signal.direction)

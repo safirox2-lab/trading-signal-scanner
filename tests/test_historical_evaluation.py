@@ -4,6 +4,7 @@ from src.evaluation.historical import (
     StrategyEvaluation,
     evaluate_static_setups,
     evaluate_strategy_profiles,
+    latest_trade_levels_for_profile,
     simulate_trade_outcome,
 )
 from src.models.signals import Direction
@@ -62,3 +63,23 @@ def test_evaluate_strategy_profiles_uses_distinct_setups_and_risk():
 
     assert setup_counts["Scalping / EMA Momentum"] != setup_counts["Order Block"]
     assert len(win_rates) > 1
+
+
+def test_latest_trade_levels_for_profile_returns_profile_specific_levels():
+    df = pd.DataFrame(
+        {
+            "open": [100, 101, 103, 102, 104, 106, 105, 107, 109, 108, 110, 112] * 6,
+            "high": [102, 104, 105, 103, 107, 108, 106, 110, 111, 109, 114, 115] * 6,
+            "low": [99, 100, 102, 100, 103, 104, 102, 106, 108, 105, 109, 111] * 6,
+            "close": [101, 103, 102, 104, 106, 105, 107, 109, 108, 110, 112, 114] * 6,
+            "volume": [1000, 1200, 900, 1500, 2000, 1000, 2500, 1100, 1300, 2600, 1400, 2800] * 6,
+        }
+    )
+
+    scalping = latest_trade_levels_for_profile(df, Direction.LONG, "Scalping / EMA Momentum")
+    trend = latest_trade_levels_for_profile(df, Direction.LONG, "Trend Alignment")
+
+    assert scalping is not None
+    assert trend is not None
+    assert scalping.take_profit != trend.take_profit
+    assert scalping.stop_loss != trend.stop_loss
