@@ -1,13 +1,54 @@
 import pandas as pd
 import streamlit as st
 
+from src.charts.candles import TradeLevels, build_candlestick_figure, chart_history_note
 from src.data.providers import default_symbols
 from src.data.yfinance_provider import YFinanceProvider
+from src.evaluation.historical import StrategyEvaluation, evaluate_static_setups
+from src.evaluation.strategy_profiles import classify_strategy_profiles, confluence_summary
 from src.strategies.scanner import scan_symbol
 
 
 APP_TITLE = "Trading Signal Scanner"
 THEME_ACCENT = "#f97316"
+STRATEGY_PROFILES = (
+    "Scalping / EMA Momentum",
+    "Order Block",
+    "FVG / Imbalance",
+    "Liquidity Sweep",
+    "Trend Alignment",
+)
+
+
+def chart_period_for_interval(interval: str) -> str:
+    if interval in {"1d", "1wk"}:
+        return "max"
+    return "730d"
+
+
+def evaluation_rows(
+    evaluations: list[StrategyEvaluation],
+    supported_profiles: tuple[str, ...],
+) -> list[dict[str, str | int | float]]:
+    rows = []
+    for evaluation in evaluations:
+        rows.append(
+            {
+                "Strategy profile": evaluation.profile,
+                "Supports current trade": "Yes" if evaluation.profile in supported_profiles else "No",
+                "Historical setups": evaluation.setups,
+                "Win rate": f"{evaluation.win_rate:.1f}%",
+                "Profit factor": evaluation.profit_factor,
+                "Average R": evaluation.average_r,
+                "Max drawdown": f"{evaluation.max_drawdown * 100:.1f}%",
+            }
+        )
+    return rows
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def load_history(symbol: str, period: str, interval: str) -> pd.DataFrame:
+    return YFinanceProvider().history(symbol, period=period, interval=interval)
 
 
 def apply_theme() -> None:
@@ -109,11 +150,42 @@ def main() -> None:
         st.dataframe(signals_to_frame(signals), use_container_width=True, hide_index=True)
         selected = st.selectbox("Detalle de senal", [signal.display_symbol for signal in signals])
         signal = next(item for item in signals if item.display_symbol == selected)
+        supported_profiles = classify_strategy_profiles(signal)
         st.markdown('<div class="signal-card">', unsafe_allow_html=True)
         st.write("Razones:", ", ".join(signal.reasons))
         st.write(f"Entrada: {signal.entry} | SL: {signal.stop_loss} | TP: {signal.take_profit}")
         st.write(f"Direccion: {signal.direction.value} | Score: {signal.score}% | R:R: {signal.risk_reward}")
+        st.write(f"Estrategias a favor: {len(supported_profiles)} - {', '.join(supported_profiles)}")
         st.markdown("</div>", unsafe_allow_html=True)
+
+        st.subheader("Grafico y niveles de trade")
+        chart_interval = st.selectbox("Intervalo del grafico", ["1h", "1d", "1wk"], index=1)
+        chart_period = chart_period_for_interval(chart_interval)
+        st.caption(chart_history_note(chart_interval))
+        try:
+            chart_df = load_history(signal.symbol, period=chart_period, interval=chart_interval)
+            levels = TradeLevels(
+                entry=signal.entry,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                direction=signal.direction,
+            )
+            fig = build_candlestick_figure(chart_df.tail(240), levels, signal.display_symbol, supported_profiles)
+            st.plotly_chart(fig, use_container_width=True)
+
+            setup_indexes = list(range(20, max(20, len(chart_df) - 5), 20))
+            evaluations = [
+                evaluate_static_setups(chart_df, signal.direction, setup_indexes, profile=profile)
+                for profile in STRATEGY_PROFILES
+            ]
+            supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
+            combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0
+            combined_setups = sum(item.setups for item in supported)
+            st.subheader("Evaluacion historica de estrategias")
+            st.write(confluence_summary(signal, combined_win_rate, combined_setups))
+            st.dataframe(evaluation_rows(evaluations, supported_profiles), use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.warning(f"No se pudo cargar el grafico/evaluacion historica: {exc}")
     else:
         st.info("No hay oportunidades que superen el filtro actual.")
 
