@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from html import escape
 
 import pandas as pd
@@ -73,6 +74,45 @@ def command_metric_card(label: str, value: str | int | float, tone: str = "orang
 def section_header_html(title: str, subtitle: str = "") -> str:
     subtitle_html = f'<div class="section-subtitle">{escape(subtitle)}</div>' if subtitle else ""
     return f'<div class="section-heading"><h2>{escape(title)}</h2>{subtitle_html}</div>'
+
+
+def chart_snapshot_metadata(
+    symbol: str,
+    interval: str,
+    period: str,
+    strategy: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    direction: str,
+) -> dict[str, str | float]:
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "period": period,
+        "strategy": strategy,
+        "entry": entry,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "direction": direction,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def chart_comparison_rows(
+    before: dict[str, str | float] | None,
+    after: dict[str, str | float],
+) -> list[dict[str, str | float]]:
+    if not before:
+        return []
+    return [
+        {"Campo": "Estrategia", "Antes": before["strategy"], "Despues": after["strategy"]},
+        {"Campo": "Symbol", "Antes": before["symbol"], "Despues": after["symbol"]},
+        {"Campo": "Intervalo", "Antes": before["interval"], "Despues": after["interval"]},
+        {"Campo": "Entry", "Antes": before["entry"], "Despues": after["entry"]},
+        {"Campo": "SL", "Antes": before["stop_loss"], "Despues": after["stop_loss"]},
+        {"Campo": "TP", "Antes": before["take_profit"], "Despues": after["take_profit"]},
+    ]
 
 
 def evaluation_rows(
@@ -615,6 +655,7 @@ def main() -> None:
                 section_header_html("Grafico y niveles de trade", "Zoom con rueda del mouse y niveles por estrategia."),
                 unsafe_allow_html=True,
             )
+            show_chart_comparison = st.toggle("Mostrar comparacion antes/despues", value=True)
             chart_interval = st.selectbox("Intervalo del grafico", ["1h", "1d", "1wk"], index=1)
             chart_period = chart_period_for_interval(chart_interval)
             st.caption(chart_history_note(chart_interval))
@@ -664,6 +705,16 @@ def main() -> None:
                     chart_tags = supported_profiles
                     if strategy_chart_choice != "Senal combinada":
                         st.warning("La estrategia seleccionada no tiene setup reciente suficiente para marcar niveles.")
+                current_snapshot_metadata = chart_snapshot_metadata(
+                    symbol=signal.display_symbol,
+                    interval=chart_interval,
+                    period=chart_period,
+                    strategy=strategy_chart_choice,
+                    entry=levels.entry,
+                    stop_loss=levels.stop_loss,
+                    take_profit=levels.take_profit,
+                    direction=signal.direction.value,
+                )
                 fig = cached_candlestick_figure(
                     signal.symbol,
                     chart_period,
@@ -675,7 +726,49 @@ def main() -> None:
                     signal.display_symbol,
                     chart_tags,
                 )
-                st.plotly_chart(fig, use_container_width=True, config=plotly_chart_config())
+                previous_snapshot = st.session_state.get("last_chart_snapshot")
+                if show_chart_comparison and previous_snapshot:
+                    st.dataframe(
+                        chart_comparison_rows(previous_snapshot["metadata"], current_snapshot_metadata),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    before_col, after_col = st.columns(2)
+                    with before_col:
+                        st.markdown(
+                            section_header_html(
+                                "Antes",
+                                f'{previous_snapshot["metadata"]["strategy"]} | {previous_snapshot["metadata"]["generated_at"]}',
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        st.plotly_chart(
+                            previous_snapshot["figure"],
+                            use_container_width=True,
+                            config=plotly_chart_config(),
+                            key="before_chart_snapshot",
+                        )
+                    with after_col:
+                        st.markdown(
+                            section_header_html(
+                                "Despues",
+                                f'{current_snapshot_metadata["strategy"]} | {current_snapshot_metadata["generated_at"]}',
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        st.plotly_chart(
+                            fig,
+                            use_container_width=True,
+                            config=plotly_chart_config(),
+                            key="after_chart_snapshot",
+                        )
+                else:
+                    st.plotly_chart(fig, use_container_width=True, config=plotly_chart_config())
+
+                st.session_state["last_chart_snapshot"] = {
+                    "metadata": current_snapshot_metadata,
+                    "figure": fig,
+                }
 
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0

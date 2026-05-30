@@ -21,4 +21,11 @@ def default_symbols() -> tuple[MarketSymbol, ...]:
         MarketSymbol("NASDAQ 100", "^NDX", "indices"),
         MarketSymbol("Dow Jones", "^DJI", "indices"),
         MarketSymbol("Gold", "GC=F", "commodities"),
+        MarketSymbol("Bitcoin", "BTC-USD", "crypto"),
+        MarketSymbol("Ethereum", "ETH-USD", "crypto"),
+        MarketSymbol("Solana", "SOL-USD", "crypto"),
+        MarketSymbol("BNB", "BNB-USD", "crypto"),
+        MarketSymbol("XRP", "XRP-USD", "crypto"),
+        MarketSymbol("Cardano", "ADA-USD", "crypto"),
+        MarketSymbol("Dogecoin", "DOGE-USD", "crypto"),
     )

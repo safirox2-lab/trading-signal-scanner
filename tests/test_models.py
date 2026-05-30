@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from src.data.providers import default_symbols
 from src.models.market import MarketSymbol, validate_ohlcv
 from src.models.signals import Direction, SignalCandidate
 
@@ -49,3 +50,21 @@ def test_market_symbol_stores_provider_symbol():
     symbol = MarketSymbol(display="EUR/USD", provider_symbol="EURUSD=X", market="forex")
 
     assert symbol.provider_symbol == "EURUSD=X"
+
+
+def test_default_symbols_include_crypto_markets():
+    crypto_symbols = {
+        symbol.display: symbol.provider_symbol
+        for symbol in default_symbols()
+        if symbol.market == "crypto"
+    }
+
+    assert crypto_symbols == {
+        "Bitcoin": "BTC-USD",
+        "Ethereum": "ETH-USD",
+        "Solana": "SOL-USD",
+        "BNB": "BNB-USD",
+        "XRP": "XRP-USD",
+        "Cardano": "ADA-USD",
+        "Dogecoin": "DOGE-USD",
+    }

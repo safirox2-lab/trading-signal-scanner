@@ -1,4 +1,5 @@
 from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_rows
+from app import chart_comparison_rows, chart_snapshot_metadata
 from app import journal_rows, scan_symbol_items, scanner_scan_key
 from app import command_center_header_html, command_metric_card, plotly_chart_config
 from app import strategy_option_label, strategy_profile_from_label
@@ -36,6 +37,36 @@ def test_plotly_chart_config_enables_mouse_wheel_zoom():
     assert config["scrollZoom"] is True
     assert config["displayModeBar"] is True
     assert config["responsive"] is True
+
+
+def test_chart_snapshot_metadata_stores_trade_levels():
+    metadata = chart_snapshot_metadata(
+        symbol="AUD/USD",
+        interval="1d",
+        period="max",
+        strategy="Order Block",
+        entry=0.7186,
+        stop_loss=0.716,
+        take_profit=0.7236,
+        direction="LONG",
+    )
+
+    assert metadata["symbol"] == "AUD/USD"
+    assert metadata["strategy"] == "Order Block"
+    assert metadata["entry"] == 0.7186
+    assert metadata["generated_at"]
+
+
+def test_chart_comparison_rows_formats_before_after_levels():
+    before = chart_snapshot_metadata("AUD/USD", "1d", "max", "Order Block", 0.7186, 0.716, 0.7236, "LONG")
+    after = chart_snapshot_metadata("AUD/USD", "1d", "max", "FVG / Imbalance", 0.7192, 0.7158, 0.726, "LONG")
+
+    rows = chart_comparison_rows(before, after)
+
+    assert rows[0]["Campo"] == "Estrategia"
+    assert rows[0]["Antes"] == "Order Block"
+    assert rows[0]["Despues"] == "FVG / Imbalance"
+    assert {"Campo": "Entry", "Antes": 0.7186, "Despues": 0.7192} in rows
 
 
 def test_evaluation_rows_formats_percentages():
