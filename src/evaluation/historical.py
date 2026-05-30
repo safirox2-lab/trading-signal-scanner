@@ -1,14 +1,13 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
 
 from src.backtest.metrics import max_drawdown, summarize_trades
 from src.indicators.imbalance import fair_value_gaps
-from src.indicators.momentum import ema_cross_direction
 from src.indicators.trend import ema
 from src.indicators.volatility import atr
 from src.models.signals import Direction
-from src.strategies.liquidity import liquidity_sweep
 from src.strategies.order_blocks import order_block_candidates
 
 
@@ -42,8 +41,9 @@ class ProfileTradeLevels:
     setup_index: int
 
 
-def simulate_trade_outcome(
-    future: pd.DataFrame,
+def _trade_outcome_from_arrays(
+    high_values: Sequence[float],
+    low_values: Sequence[float],
     direction: Direction,
     entry: float,
     stop_loss: float,
@@ -52,9 +52,9 @@ def simulate_trade_outcome(
     risk = abs(entry - stop_loss)
     if risk <= 0:
         return None
-    for _, candle in future.iterrows():
-        high = float(candle["high"])
-        low = float(candle["low"])
+    for high_value, low_value in zip(high_values, low_values):
+        high = float(high_value)
+        low = float(low_value)
         if direction == Direction.LONG:
             stop_hit = low <= stop_loss
             target_hit = high >= take_profit
@@ -66,6 +66,23 @@ def simulate_trade_outcome(
         if target_hit:
             return round(abs(take_profit - entry) / risk, 2)
     return None
+
+
+def simulate_trade_outcome(
+    future: pd.DataFrame,
+    direction: Direction,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+) -> float | None:
+    return _trade_outcome_from_arrays(
+        future["high"].to_numpy(),
+        future["low"].to_numpy(),
+        direction,
+        entry,
+        stop_loss,
+        take_profit,
+    )
 
 
 def evaluate_static_setups(
@@ -120,7 +137,10 @@ def strategy_profile_configs(df: pd.DataFrame, direction: Direction) -> list[Str
 
 
 def evaluate_strategy_profiles(df: pd.DataFrame, direction: Direction) -> list[StrategyEvaluation]:
-    latest_atr = atr(df, period=14)
+    close_values = df["close"].astype(float).to_numpy()
+    high_values = df["high"].astype(float).to_numpy()
+    low_values = df["low"].astype(float).to_numpy()
+    atr_values = atr(df, period=14).astype(float).to_numpy()
     evaluations: list[StrategyEvaluation] = []
     for config in strategy_profile_configs(df, direction):
         r_multiples: list[float] = []
@@ -128,9 +148,9 @@ def evaluate_strategy_profiles(df: pd.DataFrame, direction: Direction) -> list[S
         for index in config.setup_indexes:
             if index >= len(df) - 1:
                 continue
-            entry = float(df.iloc[index]["close"])
-            atr_value = float(latest_atr.iloc[index])
-            candle_range = float(df.iloc[index]["high"] - df.iloc[index]["low"])
+            entry = float(close_values[index])
+            atr_value = float(atr_values[index])
+            candle_range = float(high_values[index] - low_values[index])
             distance = max(atr_value * config.atr_stop_multiple, candle_range, entry * 0.001)
             if direction == Direction.LONG:
                 stop_loss = entry - distance
@@ -138,7 +158,14 @@ def evaluate_strategy_profiles(df: pd.DataFrame, direction: Direction) -> list[S
             else:
                 stop_loss = entry + distance
                 take_profit = entry - (distance * config.reward_multiple)
-            outcome = simulate_trade_outcome(df.iloc[index + 1 :], direction, entry, stop_loss, take_profit)
+            outcome = _trade_outcome_from_arrays(
+                high_values[index + 1 :],
+                low_values[index + 1 :],
+                direction,
+                entry,
+                stop_loss,
+                take_profit,
+            )
             if outcome is None:
                 continue
             r_multiples.append(outcome)
@@ -196,14 +223,11 @@ def latest_trade_levels_for_profile(
 def _ema_momentum_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
     fast = ema(df["close"], 9)
     slow = ema(df["close"], 21)
-    indexes = []
-    for index in range(1, len(df) - 1):
-        cross = ema_cross_direction(fast.iloc[: index + 1], slow.iloc[: index + 1])
-        if direction == Direction.LONG and cross == "long":
-            indexes.append(index)
-        if direction == Direction.SHORT and cross == "short":
-            indexes.append(index)
-    return indexes
+    if direction == Direction.LONG:
+        crosses = fast.shift(1).le(slow.shift(1)) & fast.gt(slow)
+    else:
+        crosses = fast.shift(1).ge(slow.shift(1)) & fast.lt(slow)
+    return [index for index, crossed in enumerate(crosses.to_numpy()) if crossed and 0 < index < len(df) - 1]
 
 
 def _order_block_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
@@ -214,14 +238,24 @@ def _order_block_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
 def _fvg_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
     wanted = "bullish" if direction == Direction.LONG else "bearish"
     gaps = fair_value_gaps(df)
-    return [index for index, row in enumerate(gaps.to_dict("records")) if row["type"] == wanted and index < len(df) - 1]
+    matches = gaps["type"].eq(wanted).to_numpy()
+    return [index for index, matched in enumerate(matches) if matched and index < len(df) - 1]
 
 
 def _liquidity_sweep_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
     wanted = "bullish_sweep" if direction == Direction.LONG else "bearish_sweep"
+    high_values = df["high"].astype(float).to_numpy()
+    low_values = df["low"].astype(float).to_numpy()
+    close_values = df["close"].astype(float).to_numpy()
     indexes = []
     for index in range(2, len(df) - 1):
-        if liquidity_sweep(df.iloc[index - 2 : index + 1], tolerance=0.05) == wanted:
+        equal_high = abs(high_values[index - 2] - high_values[index - 1]) <= 0.05
+        equal_low = abs(low_values[index - 2] - low_values[index - 1]) <= 0.05
+        prior_high = max(high_values[index - 2], high_values[index - 1])
+        prior_low = min(low_values[index - 2], low_values[index - 1])
+        bearish_sweep = equal_high and high_values[index] > prior_high and close_values[index] < prior_high
+        bullish_sweep = equal_low and low_values[index] < prior_low and close_values[index] > prior_low
+        if (wanted == "bearish_sweep" and bearish_sweep) or (wanted == "bullish_sweep" and bullish_sweep):
             indexes.append(index)
     return indexes
 

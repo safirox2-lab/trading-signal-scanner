@@ -2,6 +2,7 @@ import pandas as pd
 
 from src.evaluation.historical import (
     StrategyEvaluation,
+    _trade_outcome_from_arrays,
     evaluate_static_setups,
     evaluate_strategy_profiles,
     latest_trade_levels_for_profile,
@@ -30,6 +31,12 @@ def test_simulate_trade_outcome_counts_short_same_candle_touch_as_loss():
     future = pd.DataFrame({"high": [106.0], "low": [88.0]})
 
     result = simulate_trade_outcome(future, Direction.SHORT, entry=100.0, stop_loss=105.0, take_profit=90.0)
+
+    assert result == -1.0
+
+
+def test_trade_outcome_from_arrays_checks_stop_before_target():
+    result = _trade_outcome_from_arrays([111.0], [94.0], Direction.LONG, entry=100.0, stop_loss=95.0, take_profit=110.0)
 
     assert result == -1.0
 
