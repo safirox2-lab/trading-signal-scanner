@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.journal.chart_snapshots import ChartSnapshotRecord
 from src.journal.models import JournalStatus, RecommendationRecord
 
 
@@ -45,6 +46,33 @@ class JournalStore:
                 """
             )
             self._ensure_columns(connection)
+            self._init_chart_snapshots(connection)
+
+    def _init_chart_snapshots(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chart_snapshots (
+                snapshot_key TEXT PRIMARY KEY,
+                signal_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                display_symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                before_entry REAL NOT NULL,
+                before_stop_loss REAL NOT NULL,
+                before_take_profit REAL NOT NULL,
+                after_entry REAL NOT NULL,
+                after_stop_loss REAL NOT NULL,
+                after_take_profit REAL NOT NULL,
+                before_generated_at TEXT NOT NULL,
+                after_generated_at TEXT NOT NULL,
+                before_figure_json TEXT NOT NULL,
+                after_figure_json TEXT NOT NULL
+            )
+            """
+        )
 
     def _ensure_columns(self, connection: sqlite3.Connection) -> None:
         existing = {
@@ -95,6 +123,45 @@ class JournalStore:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM recommendations ORDER BY created_at DESC").fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def insert_chart_snapshot(self, record: ChartSnapshotRecord) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO chart_snapshots (
+                    snapshot_key, signal_key, created_at, symbol, display_symbol,
+                    direction, timeframe, strategy, before_entry, before_stop_loss,
+                    before_take_profit, after_entry, after_stop_loss, after_take_profit,
+                    before_generated_at, after_generated_at, before_figure_json, after_figure_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.snapshot_key,
+                    record.signal_key,
+                    record.created_at.isoformat(),
+                    record.symbol,
+                    record.display_symbol,
+                    record.direction,
+                    record.timeframe,
+                    record.strategy,
+                    record.before_entry,
+                    record.before_stop_loss,
+                    record.before_take_profit,
+                    record.after_entry,
+                    record.after_stop_loss,
+                    record.after_take_profit,
+                    record.before_generated_at,
+                    record.after_generated_at,
+                    record.before_figure_json,
+                    record.after_figure_json,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def list_chart_snapshots(self) -> list[ChartSnapshotRecord]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM chart_snapshots ORDER BY created_at DESC").fetchall()
+        return [self._row_to_chart_snapshot(row) for row in rows]
 
     def update_resolution(
         self,
@@ -150,4 +217,26 @@ class JournalStore:
             resolved_at=datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None,
             resolution_note=row["resolution_note"],
             feedback=row["feedback"],
+        )
+
+    def _row_to_chart_snapshot(self, row: sqlite3.Row) -> ChartSnapshotRecord:
+        return ChartSnapshotRecord(
+            snapshot_key=row["snapshot_key"],
+            signal_key=row["signal_key"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            symbol=row["symbol"],
+            display_symbol=row["display_symbol"],
+            direction=row["direction"],
+            timeframe=row["timeframe"],
+            strategy=row["strategy"],
+            before_entry=float(row["before_entry"]),
+            before_stop_loss=float(row["before_stop_loss"]),
+            before_take_profit=float(row["before_take_profit"]),
+            after_entry=float(row["after_entry"]),
+            after_stop_loss=float(row["after_stop_loss"]),
+            after_take_profit=float(row["after_take_profit"]),
+            before_generated_at=row["before_generated_at"],
+            after_generated_at=row["after_generated_at"],
+            before_figure_json=row["before_figure_json"],
+            after_figure_json=row["after_figure_json"],
         )

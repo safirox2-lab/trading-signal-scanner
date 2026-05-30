@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import sqlite3
 
+from src.journal.chart_snapshots import ChartSnapshotRecord
 from src.journal.models import JournalStatus, record_from_signal
 from src.journal.store import JournalStore
 from src.models.signals import Direction, SignalCandidate
@@ -115,3 +116,35 @@ def test_store_migrates_legacy_database(tmp_path):
     assert record.signal_key == "legacy"
     assert record.entry_triggered_at is None
     assert record.feedback == ""
+
+
+def test_store_inserts_and_lists_chart_snapshots(tmp_path):
+    store = JournalStore(tmp_path / "recommendations.db")
+    snapshot = ChartSnapshotRecord(
+        snapshot_key="snap-key",
+        signal_key="signal-key",
+        created_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+        symbol="USDCAD=X",
+        display_symbol="USD/CAD",
+        direction="SHORT",
+        timeframe="1d",
+        strategy="Order Block",
+        before_entry=1.2345,
+        before_stop_loss=1.24,
+        before_take_profit=1.22,
+        after_entry=1.236,
+        after_stop_loss=1.242,
+        after_take_profit=1.224,
+        before_generated_at="2026-05-30 00:00:00",
+        after_generated_at="2026-05-30 00:05:00",
+        before_figure_json='{"before": true}',
+        after_figure_json='{"after": true}',
+    )
+
+    assert store.insert_chart_snapshot(snapshot) is True
+    assert store.insert_chart_snapshot(snapshot) is False
+
+    records = store.list_chart_snapshots()
+    assert len(records) == 1
+    assert records[0].snapshot_key == "snap-key"
+    assert records[0].after_figure_json == '{"after": true}'

@@ -2,6 +2,8 @@ from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_r
 from app import chart_comparison_rows, chart_snapshot_metadata
 from app import journal_rows, scan_symbol_items, scanner_scan_key
 from app import command_center_header_html, command_metric_card, plotly_chart_config
+from app import chart_snapshot_rows, entry_change_tolerance, record_from_chart_levels
+from src.journal.chart_snapshots import ChartSnapshotRecord
 from app import strategy_option_label, strategy_profile_from_label
 from src.evaluation.historical import StrategyEvaluation
 from src.journal.models import JournalStatus, RecommendationRecord
@@ -67,6 +69,70 @@ def test_chart_comparison_rows_formats_before_after_levels():
     assert rows[0]["Antes"] == "Order Block"
     assert rows[0]["Despues"] == "FVG / Imbalance"
     assert {"Campo": "Entry", "Antes": 0.7186, "Despues": 0.7192} in rows
+
+
+def test_record_from_chart_levels_includes_strategy_in_key():
+    signal = SignalCandidate(
+        symbol="USDCAD=X",
+        display_symbol="USD/CAD",
+        direction=Direction.SHORT,
+        timeframe="1h",
+        entry=1.37,
+        stop_loss=1.38,
+        take_profit=1.35,
+        score=80,
+        risk_reward=2.0,
+        strategy_tags=("ORDER BLOCK",),
+        reasons=("valid order block",),
+    )
+
+    record = record_from_chart_levels(
+        signal=signal,
+        timeframe="1d",
+        strategy="Order Block",
+        entry=1.36,
+        stop_loss=1.37,
+        take_profit=1.34,
+        created_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+    )
+
+    assert "Order Block" in record.signal_key
+    assert record.entry == 1.36
+    assert record.strategy_tags == ("Order Block",)
+
+
+def test_entry_change_tolerance_scales_with_price():
+    assert entry_change_tolerance(1.0) == 0.0001
+    assert entry_change_tolerance(50000.0) == 5.0
+
+
+def test_chart_snapshot_rows_formats_saved_evolution():
+    record = ChartSnapshotRecord(
+        snapshot_key="snap",
+        signal_key="signal",
+        created_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+        symbol="USDCAD=X",
+        display_symbol="USD/CAD",
+        direction="SHORT",
+        timeframe="1d",
+        strategy="Order Block",
+        before_entry=1.234,
+        before_stop_loss=1.24,
+        before_take_profit=1.22,
+        after_entry=1.236,
+        after_stop_loss=1.242,
+        after_take_profit=1.224,
+        before_generated_at="2026-05-30 00:00:00",
+        after_generated_at="2026-05-30 00:05:00",
+        before_figure_json="{}",
+        after_figure_json="{}",
+    )
+
+    rows = chart_snapshot_rows([record])
+
+    assert rows[0]["Strategy"] == "Order Block"
+    assert rows[0]["Before Entry"] == 1.234
+    assert rows[0]["After Entry"] == 1.236
 
 
 def test_evaluation_rows_formats_percentages():

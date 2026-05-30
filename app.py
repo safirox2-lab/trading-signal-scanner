@@ -1,8 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from html import escape
 
 import pandas as pd
+import plotly.io as pio
 import streamlit as st
 
 from src.charts.candles import TradeLevels, build_candlestick_figure, chart_history_note
@@ -10,6 +11,7 @@ from src.data.providers import default_symbols
 from src.data.yfinance_provider import YFinanceProvider
 from src.evaluation.historical import StrategyEvaluation, evaluate_strategy_profiles, latest_trade_levels_for_profile
 from src.evaluation.strategy_profiles import classify_strategy_profiles, confluence_summary
+from src.journal.chart_snapshots import ChartSnapshotRecord, chart_snapshot_key, entry_changed, same_snapshot_context
 from src.journal.metrics import hit_rate_by_strategy, hit_rate_by_symbol, journal_summary, strategy_feedback_rows
 from src.journal.models import JournalStatus, RecommendationRecord, record_from_signal
 from src.journal.resolver import resolve_recommendation
@@ -112,6 +114,108 @@ def chart_comparison_rows(
         {"Campo": "Entry", "Antes": before["entry"], "Despues": after["entry"]},
         {"Campo": "SL", "Antes": before["stop_loss"], "Despues": after["stop_loss"]},
         {"Campo": "TP", "Antes": before["take_profit"], "Despues": after["take_profit"]},
+    ]
+
+
+def record_from_chart_levels(
+    signal,
+    timeframe: str,
+    strategy: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    created_at: datetime | None = None,
+) -> RecommendationRecord:
+    timestamp = created_at or datetime.now(timezone.utc)
+    signal_key = "|".join(
+        [
+            signal.symbol,
+            signal.direction.value,
+            timeframe,
+            strategy,
+            f"{entry:.5f}",
+            f"{stop_loss:.5f}",
+            f"{take_profit:.5f}",
+            timestamp.date().isoformat(),
+        ]
+    )
+    return RecommendationRecord(
+        signal_key=signal_key,
+        created_at=timestamp,
+        symbol=signal.symbol,
+        display_symbol=signal.display_symbol,
+        direction=signal.direction.value,
+        timeframe=timeframe,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        score=signal.score,
+        risk_reward=signal.risk_reward,
+        strategy_tags=(strategy,),
+        reasons=signal.reasons,
+    )
+
+
+def chart_snapshot_record_from_pair(
+    signal_key: str,
+    signal,
+    timeframe: str,
+    strategy: str,
+    before_snapshot: dict,
+    after_metadata: dict[str, str | float],
+    before_figure,
+    after_figure,
+) -> ChartSnapshotRecord:
+    created_at = datetime.now(timezone.utc)
+    snapshot_key = "|".join(
+        [
+            signal_key,
+            str(before_snapshot["metadata"]["generated_at"]),
+            str(after_metadata["generated_at"]),
+        ]
+    )
+    return ChartSnapshotRecord(
+        snapshot_key=snapshot_key,
+        signal_key=signal_key,
+        created_at=created_at,
+        symbol=signal.symbol,
+        display_symbol=signal.display_symbol,
+        direction=signal.direction.value,
+        timeframe=timeframe,
+        strategy=strategy,
+        before_entry=float(before_snapshot["metadata"]["entry"]),
+        before_stop_loss=float(before_snapshot["metadata"]["stop_loss"]),
+        before_take_profit=float(before_snapshot["metadata"]["take_profit"]),
+        after_entry=float(after_metadata["entry"]),
+        after_stop_loss=float(after_metadata["stop_loss"]),
+        after_take_profit=float(after_metadata["take_profit"]),
+        before_generated_at=str(before_snapshot["metadata"]["generated_at"]),
+        after_generated_at=str(after_metadata["generated_at"]),
+        before_figure_json=before_figure.to_json(),
+        after_figure_json=after_figure.to_json(),
+    )
+
+
+def entry_change_tolerance(entry: float) -> float:
+    return max(abs(entry) * 0.0001, 0.00001)
+
+
+def chart_snapshot_rows(records: list[ChartSnapshotRecord]) -> list[dict[str, str | float]]:
+    return [
+        {
+            "Created": record.created_at.strftime("%Y-%m-%d %H:%M"),
+            "Symbol": record.display_symbol,
+            "Direction": record.direction,
+            "Strategy": record.strategy,
+            "Before Entry": record.before_entry,
+            "After Entry": record.after_entry,
+            "Before SL": record.before_stop_loss,
+            "After SL": record.after_stop_loss,
+            "Before TP": record.before_take_profit,
+            "After TP": record.after_take_profit,
+            "Signal Key": record.signal_key,
+        }
+        for record in records
     ]
 
 
@@ -726,8 +830,14 @@ def main() -> None:
                     signal.display_symbol,
                     chart_tags,
                 )
-                previous_snapshot = st.session_state.get("last_chart_snapshot")
-                if show_chart_comparison and previous_snapshot:
+                snapshots_by_key = st.session_state.setdefault("chart_snapshots_by_key", {})
+                current_snapshot_key = chart_snapshot_key(current_snapshot_metadata)
+                previous_snapshot = snapshots_by_key.get(current_snapshot_key)
+                can_compare = show_chart_comparison and same_snapshot_context(
+                    previous_snapshot["metadata"] if previous_snapshot else None,
+                    current_snapshot_metadata,
+                )
+                if can_compare:
                     st.dataframe(
                         chart_comparison_rows(previous_snapshot["metadata"], current_snapshot_metadata),
                         use_container_width=True,
@@ -762,13 +872,43 @@ def main() -> None:
                             config=plotly_chart_config(),
                             key="after_chart_snapshot",
                         )
+
+                    if entry_changed(
+                        previous_snapshot["metadata"],
+                        current_snapshot_metadata,
+                        tolerance=entry_change_tolerance(levels.entry),
+                    ):
+                        chart_record = record_from_chart_levels(
+                            signal=signal,
+                            timeframe=chart_interval,
+                            strategy=strategy_chart_choice,
+                            entry=levels.entry,
+                            stop_loss=levels.stop_loss,
+                            take_profit=levels.take_profit,
+                        )
+                        inserted_signal = store.insert_recommendation(chart_record)
+                        inserted_snapshot = store.insert_chart_snapshot(
+                            chart_snapshot_record_from_pair(
+                                signal_key=chart_record.signal_key,
+                                signal=signal,
+                                timeframe=chart_interval,
+                                strategy=strategy_chart_choice,
+                                before_snapshot=previous_snapshot,
+                                after_metadata=current_snapshot_metadata,
+                                before_figure=previous_snapshot["figure"],
+                                after_figure=fig,
+                            )
+                        )
+                        if inserted_signal or inserted_snapshot:
+                            st.toast("Nueva entrada registrada con evolucion grafica.")
                 else:
                     st.plotly_chart(fig, use_container_width=True, config=plotly_chart_config())
 
-                st.session_state["last_chart_snapshot"] = {
+                snapshots_by_key[current_snapshot_key] = {
                     "metadata": current_snapshot_metadata,
                     "figure": fig,
                 }
+                st.session_state["chart_snapshots_by_key"] = snapshots_by_key
 
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0
@@ -853,6 +993,42 @@ def main() -> None:
 
             st.subheader("Acierto por simbolo")
             st.dataframe(hit_rate_by_symbol(records), use_container_width=True, hide_index=True)
+
+            chart_snapshots = store.list_chart_snapshots()
+            if chart_snapshots:
+                st.subheader("Evolucion grafica guardada")
+                st.dataframe(chart_snapshot_rows(chart_snapshots), use_container_width=True, hide_index=True)
+                selected_snapshot = st.selectbox(
+                    "Ver evolucion grafica",
+                    [snapshot.snapshot_key for snapshot in chart_snapshots],
+                    format_func=lambda key: next(
+                        (
+                            f"{snapshot.display_symbol} | {snapshot.strategy} | "
+                            f"{snapshot.before_generated_at} -> {snapshot.after_generated_at}"
+                            for snapshot in chart_snapshots
+                            if snapshot.snapshot_key == key
+                        ),
+                        key,
+                    ),
+                )
+                snapshot = next(item for item in chart_snapshots if item.snapshot_key == selected_snapshot)
+                before_col, after_col = st.columns(2)
+                with before_col:
+                    st.markdown(section_header_html("Antes guardado", snapshot.before_generated_at), unsafe_allow_html=True)
+                    st.plotly_chart(
+                        pio.from_json(snapshot.before_figure_json),
+                        use_container_width=True,
+                        config=plotly_chart_config(),
+                        key=f"stored_before_{snapshot.snapshot_key}",
+                    )
+                with after_col:
+                    st.markdown(section_header_html("Despues guardado", snapshot.after_generated_at), unsafe_allow_html=True)
+                    st.plotly_chart(
+                        pio.from_json(snapshot.after_figure_json),
+                        use_container_width=True,
+                        config=plotly_chart_config(),
+                        key=f"stored_after_{snapshot.snapshot_key}",
+                    )
         else:
             st.info("Aun no hay recomendaciones registradas.")
 
