@@ -1,6 +1,6 @@
 from app import APP_TITLE, THEME_ACCENT, chart_period_for_interval, evaluation_rows
 from app import journal_rows, scan_symbol_items, scanner_scan_key
-from app import plotly_chart_config
+from app import command_center_header_html, command_metric_card, plotly_chart_config
 from app import strategy_option_label, strategy_profile_from_label
 from src.evaluation.historical import StrategyEvaluation
 from src.journal.models import JournalStatus, RecommendationRecord
@@ -11,6 +11,17 @@ from datetime import datetime, timezone
 def test_app_uses_dark_orange_identity():
     assert APP_TITLE == "Trading Signal Scanner"
     assert THEME_ACCENT == "#f97316"
+
+
+def test_command_center_helpers_render_distinct_ui_classes():
+    header = command_center_header_html()
+    card = command_metric_card("Senales", 5, "green", "Activas")
+
+    assert "command-header" in header
+    assert "LIVE MARKET COMMAND CENTER" in header
+    assert "command-metric green" in card
+    assert "Senales" in card
+    assert "Activas" in card
 
 
 def test_chart_period_for_interval_uses_max_for_daily_and_limited_for_intraday():

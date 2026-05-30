@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -39,6 +40,39 @@ def plotly_chart_config() -> dict[str, bool]:
         "displayModeBar": True,
         "responsive": True,
     }
+
+
+def command_center_header_html() -> str:
+    return """
+    <div class="command-header">
+        <div>
+            <div class="eyebrow">LIVE MARKET COMMAND CENTER</div>
+            <div class="command-title">Trading Signal Scanner</div>
+            <div class="command-subtitle">Scanner tecnico, registro autonomo y feedback historico de estrategias.</div>
+        </div>
+        <div class="command-pills">
+            <span>Buscar</span>
+            <span>Registro</span>
+            <span>Feedback</span>
+        </div>
+    </div>
+    """
+
+
+def command_metric_card(label: str, value: str | int | float, tone: str = "orange", detail: str = "") -> str:
+    detail_html = f'<div class="metric-detail">{escape(str(detail))}</div>' if detail else ""
+    return (
+        f'<div class="command-metric {escape(tone)}">'
+        f'<div class="metric-label">{escape(str(label))}</div>'
+        f'<div class="metric-value">{escape(str(value))}</div>'
+        f"{detail_html}"
+        "</div>"
+    )
+
+
+def section_header_html(title: str, subtitle: str = "") -> str:
+    subtitle_html = f'<div class="section-subtitle">{escape(subtitle)}</div>' if subtitle else ""
+    return f'<div class="section-heading"><h2>{escape(title)}</h2>{subtitle_html}</div>'
 
 
 def evaluation_rows(
@@ -263,20 +297,207 @@ def journal_rows(records: list[RecommendationRecord]) -> list[dict[str, str | in
     ]
 
 
+def signal_detail_html(signal, supported_profiles: tuple[str, ...]) -> str:
+    return f"""
+    <div class="signal-panel">
+        <div class="panel-topline">
+            <span class="badge {signal.direction.value.lower()}">{escape(signal.direction.value)}</span>
+            <span>{escape(signal.display_symbol)}</span>
+            <span>Score {signal.score}%</span>
+            <span>R:R {signal.risk_reward}</span>
+        </div>
+        <div class="level-grid">
+            <div><span>Entrada</span><strong>{signal.entry}</strong></div>
+            <div><span>Stop Loss</span><strong class="risk">{signal.stop_loss}</strong></div>
+            <div><span>Take Profit</span><strong class="win">{signal.take_profit}</strong></div>
+        </div>
+        <div class="panel-note">Razones: {escape(", ".join(signal.reasons))}</div>
+        <div class="panel-note">Estrategias a favor: {len(supported_profiles)} - {escape(", ".join(supported_profiles))}</div>
+    </div>
+    """
+
+
 def apply_theme() -> None:
     st.markdown(
         """
         <style>
-        .stApp { background: #0c0a12; color: #f5f3ff; }
-        [data-testid="stSidebar"] { background: #15111f; border-right: 1px solid #312e44; }
+        .stApp { background: #0b0a10; color: #f5f3ff; }
+        .block-container { padding-top: 1.1rem; padding-bottom: 2rem; }
+        [data-testid="stSidebar"] {
+            background: #15111f;
+            border-right: 1px solid #312e44;
+            box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22);
+        }
         h1, h2, h3 { color: #fb923c; }
         div[data-testid="stMetricValue"] { color: #fb923c; }
-        div[data-testid="stTabs"] button { color: #f5f3ff; }
-        .signal-card {
+        div[data-testid="stTabs"] {
+            background: #0f0d16;
+            border: 1px solid #2f293d;
+            border-radius: 8px;
+            padding: 6px 8px 0 8px;
+        }
+        div[data-testid="stTabs"] button {
+            color: #f5f3ff;
+            border-radius: 6px 6px 0 0;
+            font-weight: 700;
+        }
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            color: #fb923c;
+            border-bottom: 2px solid #fb923c;
+            background: #1b1626;
+        }
+        .stButton > button {
+            border-radius: 6px;
+            border: 1px solid #45384f;
+            font-weight: 700;
+        }
+        .stButton > button[kind="primary"] {
+            background: #f97316;
+            border-color: #f97316;
+            color: #111827;
+        }
+        .command-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            align-items: center;
+            padding: 18px 20px;
+            margin-bottom: 16px;
+            border: 1px solid #38304c;
+            border-radius: 8px;
+            background:
+                linear-gradient(135deg, rgba(249, 115, 22, 0.14), rgba(56, 189, 248, 0.08)),
+                #100d18;
+        }
+        .eyebrow {
+            color: #38bdf8;
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            margin-bottom: 4px;
+        }
+        .command-title {
+            color: #fff7ed;
+            font-size: 2.1rem;
+            line-height: 1.1;
+            font-weight: 900;
+        }
+        .command-subtitle {
+            color: #c7bfd8;
+            margin-top: 6px;
+        }
+        .command-pills {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .command-pills span {
+            background: #1f2937;
+            border: 1px solid #38304c;
+            color: #f5f3ff;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-weight: 800;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin: 12px 0 18px 0;
+        }
+        .command-metric {
+            background: #15111f;
+            border: 1px solid #38304c;
+            border-left: 4px solid #fb923c;
+            border-radius: 7px;
+            padding: 12px 14px;
+            min-height: 86px;
+        }
+        .command-metric.green { border-left-color: #22c55e; }
+        .command-metric.red { border-left-color: #ef4444; }
+        .command-metric.cyan { border-left-color: #38bdf8; }
+        .metric-label {
+            color: #a9a0b8;
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .metric-value {
+            color: #fff7ed;
+            font-size: 1.65rem;
+            font-weight: 900;
+            margin-top: 5px;
+        }
+        .metric-detail {
+            color: #c7bfd8;
+            font-size: 0.82rem;
+            margin-top: 4px;
+        }
+        .section-heading {
+            margin: 20px 0 10px 0;
+        }
+        .section-heading h2 {
+            margin: 0;
+            color: #fff7ed;
+        }
+        .section-subtitle {
+            color: #a9a0b8;
+            margin-top: 4px;
+        }
+        .signal-panel {
             background: #15111f;
             border: 1px solid #38304c;
             border-radius: 8px;
-            padding: 14px;
+            padding: 14px 16px;
+            margin: 10px 0 18px 0;
+        }
+        .panel-topline {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            color: #f5f3ff;
+            font-weight: 800;
+        }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 900;
+        }
+        .badge.long { background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid #22c55e; }
+        .badge.short { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid #ef4444; }
+        .level-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .level-grid div {
+            background: #0f0d16;
+            border: 1px solid #2f293d;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .level-grid span {
+            display: block;
+            color: #a9a0b8;
+            font-size: 0.76rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .level-grid strong {
+            color: #fff7ed;
+            display: block;
+            margin-top: 3px;
+            font-size: 1.08rem;
+        }
+        .level-grid .risk { color: #fca5a5; }
+        .level-grid .win { color: #86efac; }
+        .panel-note {
+            color: #c7bfd8;
+            margin-top: 10px;
         }
         .disclaimer {
             color: #d8d5e8;
@@ -284,6 +505,11 @@ def apply_theme() -> None:
             border-left: 4px solid #f97316;
             padding: 10px 12px;
             border-radius: 6px;
+        }
+        @media (max-width: 900px) {
+            .command-header { align-items: flex-start; flex-direction: column; }
+            .metric-grid, .level-grid { grid-template-columns: 1fr; }
+            .command-title { font-size: 1.6rem; }
         }
         </style>
         """,
@@ -313,7 +539,7 @@ def signals_to_frame(signals) -> pd.DataFrame:
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     apply_theme()
-    st.title(APP_TITLE)
+    st.markdown(command_center_header_html(), unsafe_allow_html=True)
     st.markdown(
         '<div class="disclaimer">Herramienta educativa/de analisis. No es asesoria financiera ni garantia de ganancia.</div>',
         unsafe_allow_html=True,
@@ -352,11 +578,15 @@ def main() -> None:
         scan_now or force_scan,
     )
     has_current_scan = st.session_state.get("scanner_scan_key") == scan_key
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Senales", len(signals))
-    col2.metric("Score minimo", f"{min_score}%")
-    col3.metric("Riesgo", "1%")
-    col4.metric("Mercados", len(selected_symbols))
+    st.markdown(
+        '<div class="metric-grid">'
+        + command_metric_card("Senales", len(signals), "green", "Oportunidades filtradas")
+        + command_metric_card("Score minimo", f"{min_score}%", "orange", "Umbral de calidad")
+        + command_metric_card("Riesgo", "1%", "red", "Por operacion")
+        + command_metric_card("Mercados", len(selected_symbols), "cyan", "Simbolos activos")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
     store = JournalStore()
     if auto_record:
@@ -370,20 +600,21 @@ def main() -> None:
     scanner_tab, journal_tab, feedback_tab = st.tabs(["Buscar", "Registro", "Feedback"])
 
     with scanner_tab:
-        st.subheader("Oportunidades")
+        st.markdown(
+            section_header_html("Oportunidades", "Ranking de setups detectados con las reglas actuales."),
+            unsafe_allow_html=True,
+        )
         if signals:
             st.dataframe(signals_to_frame(signals), use_container_width=True, hide_index=True)
             selected = st.selectbox("Detalle de senal", [signal.display_symbol for signal in signals])
             signal = next(item for item in signals if item.display_symbol == selected)
             supported_profiles = classify_strategy_profiles(signal)
-            st.markdown('<div class="signal-card">', unsafe_allow_html=True)
-            st.write("Razones:", ", ".join(signal.reasons))
-            st.write(f"Entrada: {signal.entry} | SL: {signal.stop_loss} | TP: {signal.take_profit}")
-            st.write(f"Direccion: {signal.direction.value} | Score: {signal.score}% | R:R: {signal.risk_reward}")
-            st.write(f"Estrategias a favor: {len(supported_profiles)} - {', '.join(supported_profiles)}")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(signal_detail_html(signal, supported_profiles), unsafe_allow_html=True)
 
-            st.subheader("Grafico y niveles de trade")
+            st.markdown(
+                section_header_html("Grafico y niveles de trade", "Zoom con rueda del mouse y niveles por estrategia."),
+                unsafe_allow_html=True,
+            )
             chart_interval = st.selectbox("Intervalo del grafico", ["1h", "1d", "1wk"], index=1)
             chart_period = chart_period_for_interval(chart_interval)
             st.caption(chart_history_note(chart_interval))
@@ -449,7 +680,10 @@ def main() -> None:
                 supported = [item for item in evaluations if item.profile in supported_profiles and item.setups > 0]
                 combined_win_rate = sum(item.win_rate for item in supported) / len(supported) if supported else 0.0
                 combined_setups = sum(item.setups for item in supported)
-                st.subheader("Evaluacion historica de estrategias")
+                st.markdown(
+                    section_header_html("Evaluacion historica de estrategias", "Win rate y riesgo por perfil de setup."),
+                    unsafe_allow_html=True,
+                )
                 st.write(confluence_summary(signal, combined_win_rate, combined_setups))
                 st.dataframe(evaluation_rows(evaluations, supported_profiles), use_container_width=True, hide_index=True)
             except Exception as exc:
@@ -461,7 +695,10 @@ def main() -> None:
                 st.info("Scanner listo para buscar oportunidades.")
 
     with journal_tab:
-        st.subheader("Registro autonomo")
+        st.markdown(
+            section_header_html("Registro autonomo", "Ciclo completo: recomendacion, entrada activada, TP/SL y resultado."),
+            unsafe_allow_html=True,
+        )
         st.caption(
             "Este registro mide resultados historicos de recomendaciones guardadas. "
             "En Streamlit Cloud, el registro local puede reiniciarse; para persistencia real conecta Supabase/Postgres."
@@ -496,15 +733,19 @@ def main() -> None:
 
         records = store.list_recommendations()
         summary = journal_summary(records)
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Total", summary["total"])
-        m2.metric("TP", summary["wins"])
-        m3.metric("SL", summary["losses"])
-        m4.metric("Abiertas", summary["open"])
-        m5.metric("Esperando entrada", summary["waiting_entry"])
-        m6.metric("% acierto", f'{summary["hit_rate"]:.1f}%')
-        st.metric("% activacion entrada", f'{summary["activation_rate"]:.1f}%')
-        st.metric("Average R", summary["average_r"])
+        st.markdown(
+            '<div class="metric-grid">'
+            + command_metric_card("Total", summary["total"], "cyan")
+            + command_metric_card("TP", summary["wins"], "green")
+            + command_metric_card("SL", summary["losses"], "red")
+            + command_metric_card("Esperando entrada", summary["waiting_entry"], "orange")
+            + command_metric_card("% acierto", f'{summary["hit_rate"]:.1f}%', "green")
+            + command_metric_card("% activacion", f'{summary["activation_rate"]:.1f}%', "cyan")
+            + command_metric_card("Abiertas", summary["open"], "orange")
+            + command_metric_card("Average R", summary["average_r"], "cyan")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
 
         if records:
             statuses = ["ALL"] + sorted({record.status.value for record in records})
@@ -523,7 +764,10 @@ def main() -> None:
             st.info("Aun no hay recomendaciones registradas.")
 
     with feedback_tab:
-        st.subheader("Feedback de estrategias")
+        st.markdown(
+            section_header_html("Feedback de estrategias", "Lectura historica para mejorar reglas y priorizar setups."),
+            unsafe_allow_html=True,
+        )
         records = store.list_recommendations()
         if records:
             feedback_rows = strategy_feedback_rows(records)
