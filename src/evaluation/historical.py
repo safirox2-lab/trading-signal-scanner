@@ -198,7 +198,10 @@ def latest_trade_levels_for_profile(
     config = configs.get(profile)
     if config is None or not config.setup_indexes:
         return None
-    setup_index = max(index for index in config.setup_indexes if index < len(df))
+    eligible_indexes = [index for index in config.setup_indexes if index < len(df)]
+    if not eligible_indexes:
+        return None
+    setup_index = max(eligible_indexes)
     latest_atr = atr(df, period=14)
     entry = float(df.iloc[setup_index]["close"])
     atr_value = float(latest_atr.iloc[setup_index])
@@ -238,6 +241,8 @@ def _order_block_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
 def _fvg_indexes(df: pd.DataFrame, direction: Direction) -> list[int]:
     wanted = "bullish" if direction == Direction.LONG else "bearish"
     gaps = fair_value_gaps(df)
+    if "type" not in gaps:
+        return []
     matches = gaps["type"].eq(wanted).to_numpy()
     return [index for index, matched in enumerate(matches) if matched and index < len(df) - 1]
 
@@ -255,7 +260,12 @@ def _liquidity_sweep_indexes(df: pd.DataFrame, direction: Direction) -> list[int
         prior_low = min(low_values[index - 2], low_values[index - 1])
         bearish_sweep = equal_high and high_values[index] > prior_high and close_values[index] < prior_high
         bullish_sweep = equal_low and low_values[index] < prior_low and close_values[index] > prior_low
-        if (wanted == "bearish_sweep" and bearish_sweep) or (wanted == "bullish_sweep" and bullish_sweep):
+        sweep = None
+        if bearish_sweep:
+            sweep = "bearish_sweep"
+        elif bullish_sweep:
+            sweep = "bullish_sweep"
+        if sweep == wanted:
             indexes.append(index)
     return indexes
 

@@ -102,6 +102,41 @@ def test_evaluate_strategy_profiles_uses_distinct_setups_and_risk():
     assert len(win_rates) > 1
 
 
+def test_liquidity_sweep_preserves_bearish_first_tie_breaking():
+    df = pd.DataFrame(
+        {
+            "open": [95.0, 95.0, 95.0, 95.0],
+            "high": [100.0, 100.03, 101.0, 108.0],
+            "low": [90.0, 90.02, 89.0, 80.0],
+            "close": [95.0, 95.0, 95.0, 90.0],
+            "volume": [1000, 1000, 1000, 1000],
+        }
+    )
+
+    long_evaluations = evaluate_strategy_profiles(df, Direction.LONG)
+    short_evaluations = evaluate_strategy_profiles(df, Direction.SHORT)
+    long_setups = {item.profile: item.setups for item in long_evaluations}
+    short_setups = {item.profile: item.setups for item in short_evaluations}
+
+    assert long_setups["Liquidity Sweep"] == 0
+    assert short_setups["Liquidity Sweep"] == 1
+
+
+def test_evaluate_strategy_profiles_handles_empty_ohlcv_history():
+    df = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+    evaluations = evaluate_strategy_profiles(df, Direction.LONG)
+
+    assert [item.profile for item in evaluations] == [
+        "Scalping / EMA Momentum",
+        "Order Block",
+        "FVG / Imbalance",
+        "Liquidity Sweep",
+        "Trend Alignment",
+    ]
+    assert all(item.setups == 0 for item in evaluations)
+
+
 def test_latest_trade_levels_for_profile_returns_profile_specific_levels():
     df = pd.DataFrame(
         {
