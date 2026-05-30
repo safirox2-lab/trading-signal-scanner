@@ -749,7 +749,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         if signals:
-            st.dataframe(signals_to_frame(signals), use_container_width=True, hide_index=True)
+            st.dataframe(signals_to_frame(signals), width="stretch", hide_index=True)
             selected = st.selectbox("Detalle de senal", [signal.display_symbol for signal in signals])
             signal = next(item for item in signals if item.display_symbol == selected)
             supported_profiles = classify_strategy_profiles(signal)
@@ -840,7 +840,7 @@ def main() -> None:
                 if can_compare:
                     st.dataframe(
                         chart_comparison_rows(previous_snapshot["metadata"], current_snapshot_metadata),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                     before_col, after_col = st.columns(2)
@@ -854,7 +854,7 @@ def main() -> None:
                         )
                         st.plotly_chart(
                             previous_snapshot["figure"],
-                            use_container_width=True,
+                            width="stretch",
                             config=plotly_chart_config(),
                             key="before_chart_snapshot",
                         )
@@ -868,7 +868,7 @@ def main() -> None:
                         )
                         st.plotly_chart(
                             fig,
-                            use_container_width=True,
+                            width="stretch",
                             config=plotly_chart_config(),
                             key="after_chart_snapshot",
                         )
@@ -902,7 +902,7 @@ def main() -> None:
                         if inserted_signal or inserted_snapshot:
                             st.toast("Nueva entrada registrada con evolucion grafica.")
                 else:
-                    st.plotly_chart(fig, use_container_width=True, config=plotly_chart_config())
+                    st.plotly_chart(fig, width="stretch", config=plotly_chart_config())
 
                 snapshots_by_key[current_snapshot_key] = {
                     "metadata": current_snapshot_metadata,
@@ -918,7 +918,7 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
                 st.write(confluence_summary(signal, combined_win_rate, combined_setups))
-                st.dataframe(evaluation_rows(evaluations, supported_profiles), use_container_width=True, hide_index=True)
+                st.dataframe(evaluation_rows(evaluations, supported_profiles), width="stretch", hide_index=True)
             except Exception as exc:
                 st.warning(f"No se pudo cargar el grafico/evaluacion historica: {exc}")
         else:
@@ -986,18 +986,18 @@ def main() -> None:
             filtered = records if selected_status == "ALL" else [
                 record for record in records if record.status.value == selected_status
             ]
-            st.dataframe(journal_rows(filtered), use_container_width=True, hide_index=True)
+            st.dataframe(journal_rows(filtered), width="stretch", hide_index=True)
 
             st.subheader("Acierto por estrategia")
-            st.dataframe(hit_rate_by_strategy(records), use_container_width=True, hide_index=True)
+            st.dataframe(hit_rate_by_strategy(records), width="stretch", hide_index=True)
 
             st.subheader("Acierto por simbolo")
-            st.dataframe(hit_rate_by_symbol(records), use_container_width=True, hide_index=True)
+            st.dataframe(hit_rate_by_symbol(records), width="stretch", hide_index=True)
 
             chart_snapshots = store.list_chart_snapshots()
             if chart_snapshots:
                 st.subheader("Evolucion grafica guardada")
-                st.dataframe(chart_snapshot_rows(chart_snapshots), use_container_width=True, hide_index=True)
+                st.dataframe(chart_snapshot_rows(chart_snapshots), width="stretch", hide_index=True)
                 selected_snapshot = st.selectbox(
                     "Ver evolucion grafica",
                     [snapshot.snapshot_key for snapshot in chart_snapshots],
@@ -1017,7 +1017,7 @@ def main() -> None:
                     st.markdown(section_header_html("Antes guardado", snapshot.before_generated_at), unsafe_allow_html=True)
                     st.plotly_chart(
                         pio.from_json(snapshot.before_figure_json),
-                        use_container_width=True,
+                        width="stretch",
                         config=plotly_chart_config(),
                         key=f"stored_before_{snapshot.snapshot_key}",
                     )
@@ -1025,7 +1025,7 @@ def main() -> None:
                     st.markdown(section_header_html("Despues guardado", snapshot.after_generated_at), unsafe_allow_html=True)
                     st.plotly_chart(
                         pio.from_json(snapshot.after_figure_json),
-                        use_container_width=True,
+                        width="stretch",
                         config=plotly_chart_config(),
                         key=f"stored_after_{snapshot.snapshot_key}",
                     )
@@ -1040,7 +1040,7 @@ def main() -> None:
         records = store.list_recommendations()
         if records:
             feedback_rows = strategy_feedback_rows(records)
-            st.dataframe(feedback_rows, use_container_width=True, hide_index=True)
+            st.dataframe(feedback_rows, width="stretch", hide_index=True)
             resolved = [row for row in feedback_rows if row["wins"] + row["losses"] > 0]
             if resolved:
                 best = max(resolved, key=lambda row: (row["hit_rate"], row["average_r"]))
