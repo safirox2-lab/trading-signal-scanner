@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .streamlit/secrets.toml
 .superpowers/
+.worktrees/
 *.pyc
 *.pyo
 streamlit*.log
